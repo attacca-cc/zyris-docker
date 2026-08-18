@@ -6,10 +6,10 @@
 # kubectl CLI comes from the official dl.k8s.io release channel.
 
 ARG RUST_VERSION=1.97
-ARG DEBIAN_VERSION=bookworm-slim
+ARG DEBIAN_VERSION=bookworm
 
 ########## builder ##########
-FROM rust:${RUST_VERSION}-${DEBIAN_VERSION} AS builder
+FROM rust:${RUST_VERSION}-slim-${DEBIAN_VERSION} AS builder
 WORKDIR /build
 # Fetch and compile dependencies first (best layer caching). The dummy main is replaced below.
 COPY Cargo.toml Cargo.lock* ./
@@ -19,7 +19,7 @@ COPY src ./src
 RUN touch src/main.rs && cargo build --release -j2
 
 ########## runtime ##########
-FROM debian:${DEBIAN_VERSION} AS runtime
+FROM debian:${DEBIAN_VERSION}-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
