@@ -40,7 +40,25 @@ use crate::heal::{ConnSlot, SelfHealer};
 use crate::monitor::{MonitorNode, MonitorServer};
 use crate::terminal::GatedTerminal;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("zyris-docker {VERSION}");
+        return;
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!(
+            "zyris-docker {VERSION} — a Zyris node for containers.\n\n\
+             Connects this container to Attacca and exposes monitor, file_io and terminal \n\
+             capabilities, plus a self-healing watcher. Configure with the ZYRIS_* / ZYRISD_* \n\
+             environment variables (see README.md).\n\n\
+             USAGE:\n  zyris-docker [--version] [--help]\n"
+        );
+        return;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

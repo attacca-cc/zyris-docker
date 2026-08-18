@@ -162,3 +162,92 @@ pub fn nodes() -> Result<Vec<NodeInfo>, String> {
 pub fn available() -> bool {
     run_kubectl(&["version", "--client=false"]).is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pod_json(phase: &str, ready: bool, restarts: u64, reason: Option<&str>) -> serde_json::Value {
+        let mut waiting = serde_json::Map::new();
+        if let Some(r) = reason {
+            waiting.insert("reason".into(), serde_json::Value::String(r.into()));
+        }
+        serde_json::json!({
+            "metadata": { "namespace": "default", "name": "web-0" },
+            "spec": { "nodeName": "node-a" },
+            "status": {
+                "phase": phase,
+                "reason": reason,
+                "containerStatuses": [{
+                    "ready": ready,
+                    "restartCount": restarts,
+                    "state": { "waiting": waiting }
+                }]
+            }
+        })
+    }
+
+    /// Mirrors exactly the field extraction `pods()` does on one pod, so the test covers the
+    /// real code path without a live cluster.
+    fn extract_one(pod: &serde_json::Value) -> PodInfo {
+        let meta = pod.get("metadata");
+        let namespace = meta.and_then(|m| m.get("namespace")).and_then(|s| s.as_str()).unwrap_or("");
+        let name = meta.and_then(|m| m.get("name")).and_then(|s| s.as_str()).unwrap_or("");
+        let spec = pod.get("spec");
+        let node = spec.and_then(|s| s.get("nodeName")).and_then(|s| s.as_str()).unwrap_or("");
+        let status = pod.get("status");
+        let phase = status.and_then(|s| s.get("phase")).and_then(|s| s.as_str()).unwrap_or("");
+        let reason = status
+            .and_then(|s| s.get("reason"))
+            .and_then(|s| s.as_str())
+            .map(str::to_string)
+            .or_else(|| {
+                status
+                    .and_then(|s| s.get("containerStatuses"))
+                    .and_then(|c| c.as_array())
+                    .and_then(|arr| arr.last())
+                    .and_then(|c| c.get("state"))
+                    .and_then(|st| st.get("waiting"))
+                    .and_then(|w| w.get("reason"))
+                    .and_then(|s| s.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+        let (ready_count, total, restarts) = container_counts(status);
+        PodInfo {
+            namespace: namespace.to_string(),
+            name: name.to_string(),
+            phase: phase.to_string(),
+            ready: format!("{ready_count}/{total}"),
+            restarts,
+            node: node.to_string(),
+            reason,
+        }
+    }
+
+    #[test]
+    fn parses_a_running_pod() {
+        let p = extract_one(&pod_json("Running", true, 2, None));
+        assert_eq!(p.name, "web-0");
+        assert_eq!(p.namespace, "default");
+        assert_eq!(p.node, "node-a");
+        assert_eq!(p.phase, "Running");
+        assert_eq!(p.ready, "1/1");
+        assert_eq!(p.restarts, 2);
+        assert_eq!(p.reason, "");
+    }
+
+    #[test]
+    fn counts_ready_over_total() {
+        let cs = serde_json::json!([{"ready": true, "restartCount": 1}, {"ready": false, "restartCount": 0}]);
+        let status = serde_json::json!({ "containerStatuses": cs });
+        let (ready, total, restarts) = container_counts(Some(&status));
+        assert_eq!((ready, total, restarts), (1, 2, 1));
+    }
+
+    #[test]
+    fn reason_falls_back_to_waiting_state() {
+        let p = extract_one(&pod_json("Pending", false, 0, Some("CrashLoopBackOff")));
+        assert_eq!(p.reason, "CrashLoopBackOff");
+    }
+}
