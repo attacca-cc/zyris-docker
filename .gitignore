@@ -1,0 +1,54 @@
+# Build output
+/target
+/dist
+
+# Rust toolchain / editor local state
+rust-toolchain.toml.local
+.cargo/config.local.toml
+
+# Credentials, tokens, keys — never leak the node identity
+*.pem
+*.key
+*.token
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.cred
+*.tombstone
+
+# Node runtime state & enrollment data
+.zyris/
+.zyris-*
+config.toml
+credentials.toml
+*credentials*
+!src/**/credentials*   # (none, but don't ignore source)
+*.part
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs & runtime artifacts
+*.log
+*.pid
+nohup.out
+
+# Kube configs — never ship a cluster credential
+kubeconfig
+*.kubeconfig
+admin.conf
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# CI / scratch
+/build/
+/.release/

@@ -1,0 +1,46 @@
+[package]
+name = "zyris-docker"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A Zyris node for containers: monitor system, Docker and Kubernetes state, edit files, run commands, and self-heal through Attacca."
+repository = "https://github.com/attacca-cc/zyris-docker"
+publish = false
+
+[[bin]]
+name = "zyris-docker"
+path = "src/main.rs"
+
+[dependencies]
+# Pinned to the same rev zyris-daemon builds against. `zyris-caps` is the capability contract
+# (traits + generated Server/Client), `zyris-capkit` the implementations (file-io, terminal), and
+# `zyris-attacca` the client a node uses to call back into Attacca for self-healing.
+zyris = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7" }
+zyris-caps = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7" }
+zyris-capkit = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7", features = ["file-io", "terminal"] }
+zyris-attacca = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7" }
+
+# libc only for `statvfs` (root-filesystem disk usage). Linux-only on purpose: this node targets
+# containers, and its system sampling reads /proc.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+anyhow = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time", "sync", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+# Static build inside the container; strip to keep the image small.
+strip = true
+lto = "thin"
+
+[profile.dev]
+debug = "line-tables-only"

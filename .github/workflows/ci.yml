@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-test:
+    name: check + test (linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo check
+        run: cargo check --release
+      - name: cargo test
+        run: cargo test
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+
+  # The binary is used inside the container, so at least confirm the release build strips cleanly.
+  release-build-smoke:
+    name: release build smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build --release
+        run: cargo build --release
+      - name: binary runs
+        run: ./target/release/zyris-docker --help >/dev/null 2>&1 || test $? -ne 127

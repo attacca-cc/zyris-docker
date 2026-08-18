@@ -1,0 +1,13 @@
+target
+.git
+.gitignore
+docs
+*.log
+.env
+.env.*
+**/*.pem
+**/*.key
+**/*.token
+.idea
+.vscode
+.DS_Store
