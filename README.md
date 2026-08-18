@@ -9,7 +9,7 @@ optimised for a machine with a display, this one is optimised for a containerise
 
 | capability | what it does |
 |---|---|
-| `monitor` | System snapshot, process list, Docker container state, Kubernetes pod/node state |
+| `monitor` | System snapshot, process list, Docker container state/logs, Kubernetes pod/node state |
 | `file_io` | Read, write, edit, list, remove inside the configured roots |
 | `terminal` | PTY shell and `exec` (with timeout + output cap), gated to the configured roots |
 
