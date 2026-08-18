@@ -295,7 +295,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         let t = term(&root);
-        let out = run(&t, "printf 'a%.0s' {1..500}", None, None).await.unwrap();
+        let out = run(&t, "head -c 5000 /dev/zero | tr \\0 a", None, None).await.unwrap();
         assert_eq!(out.exit_code, 0);
         assert!(out.stdout_truncated, "expected a truncated flag");
         assert!(out.stdout.len() <= 64 + 64, "{}", out.stdout.len());
