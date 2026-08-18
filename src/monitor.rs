@@ -82,6 +82,10 @@ pub trait Monitor {
     /// Restart a Docker container by name or id (stops then starts it).
     async fn docker_restart(&self, selector: String) -> zyris::Result<ActionResult>;
 
+    /// Tail the logs of a Docker container by name or id. `tail` is how many of the most recent
+    /// log lines to return (0 = all); `follow` streams new lines (best avoided for a unary call).
+    async fn docker_logs(&self, selector: String, tail: u64, follow: bool) -> zyris::Result<ActionResult>;
+
     /// List all Kubernetes pods across every namespace, with phase, readiness, restarts, node and
     /// failure reason. Requires `kubectl` and a reachable cluster (or in-cluster config).
     async fn k8s_pods(&self) -> zyris::Result<Vec<PodInfo>>;
@@ -133,6 +137,20 @@ impl Monitor for MonitorNode {
 
     async fn docker_restart(&self, selector: String) -> zyris::Result<ActionResult> {
         Ok(run_action(&["restart", &selector]))
+    }
+
+    async fn docker_logs(&self, selector: String, tail: u64, follow: bool) -> zyris::Result<ActionResult> {
+        let mut args: Vec<String> = vec!["logs".into()];
+        if tail > 0 {
+            args.push("--tail".into());
+            args.push(tail.to_string());
+        }
+        if follow {
+            args.push("--follow".into());
+        }
+        args.push(selector);
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        Ok(run_action(&refs))
     }
 
     async fn k8s_pods(&self) -> zyris::Result<Vec<PodInfo>> {
