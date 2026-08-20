@@ -103,23 +103,20 @@ fn main() {
 
     // The self-healing watcher runs for the life of the process. It samples on its own timer and
     // uses whichever connection is current; on a reconnect the slot is re-filled by on_connect.
-    let watcher = {
-        let mut healer = SelfHealer::new(heal_cfg, slot.clone());
-        tokio::spawn(async move { healer.run().await })
-    };
-
-    // `run` returns only on shutdown; the watcher is aborted as the process exits.
-    let code = pollster_tokio(runner);
-    watcher.abort();
+    // It is spawned *inside* the runtime below (not before), or `tokio::spawn` panics with
+    // "no reactor running".
+    let code = run_runtime(runner, heal_cfg, slot);
     std::process::exit(code);
 }
 
-/// Block on the runner's tokio future. `#[tokio::main]` is awkward here because the watcher must
-/// be spawned inside the same runtime; running the runtime manually keeps both on one executor.
-fn pollster_tokio(runner: Runner) -> i32 {
+/// Create the tokio runtime, spawn the self-healing watcher on it, and run the node.
+fn run_runtime(runner: Runner, heal_cfg: Config, slot: ConnSlot) -> i32 {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
     rt.block_on(async {
+        let mut healer = SelfHealer::new(heal_cfg, slot);
+        let watcher = tokio::spawn(async move { healer.run().await });
         let code = runner.run().await;
+        watcher.abort();
         if code == std::process::ExitCode::SUCCESS { 0 } else { 1 }
     })
 }
