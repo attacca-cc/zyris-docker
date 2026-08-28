@@ -1,9 +1,10 @@
 //! zyris-docker configuration.
 //!
-//! The zyris runtime already reads the standard `ZYRIS_*` variables (`ZYRIS_SERVER_URL`,
-//! `ZYRIS_NODE_NAME`, `ZYRIS_PROFILE`, `ZYRIS_SCOPES`) and resolves credentials from
-//! `ZYRIS_NODE_TOKEN` / `ZYRIS_NODE_TOKEN_FILE`. Everything else this node needs lives here, under a
-//! `ZYRISD_` prefix so it can never collide with the runtime's own variables.
+//! The standard `ZYRIS_*` variables (`ZYRIS_SERVER_URL`, `ZYRIS_NODE_NAME`, `ZYRIS_PROFILE`,
+//! `ZYRIS_SCOPES`, `ZYRIS_CONFIG_DIR`) and the credential sources (`ZYRIS_NODE_TOKEN` /
+//! `ZYRIS_NODE_TOKEN_FILE`) are read by `crate::runtime` — **this node's own program layer since
+//! upstream deleted `zyris::runtime`**, not the library's. Everything else this node needs lives
+//! here, under a `ZYRISD_` prefix so it can never collide with those.
 
 use std::time::Duration;
 

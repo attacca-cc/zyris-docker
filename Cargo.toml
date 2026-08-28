@@ -12,27 +12,61 @@ name = "zyris-docker"
 path = "src/main.rs"
 
 [dependencies]
-# Pinned to the same rev zyris-daemon builds against. `zyris-caps` is the capability contract
-# (traits + generated Server/Client), `zyris-capkit` the implementations (file-io, terminal), and
-# `zyris-attacca` the client a node uses to call back into Attacca for self-healing.
-zyris = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7" }
-zyris-caps = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7" }
-zyris-capkit = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7", features = ["file-io", "terminal"] }
-zyris-attacca = { git = "https://github.com/attacca-cc/zyris", rev = "509bb5f8beae40f572ff7374e29bb80a50b26be7" }
+# Pinned to zyris-protocol `4e3ec99`. **All five must be the same rev** — a mismatch links the same
+# crate twice and every shared type stops being the same type ("same type but the types differ").
+#
+# **The repository was renamed** `attacca-cc/zyris` -> `attacca-cc/zyris-protocol`. GitHub redirects
+# the old name, which is why the stale URL kept resolving and said nothing — until somebody creates
+# a repository at the name it was freed from, and then it resolves to that instead.
+#
+# **`features = ["enroll"]` is not optional, and it is also how the TLS provider gets chosen.**
+# Upstream spells it `enroll = ["dep:reqwest", "tls-ring"]`: enrolment is an HTTPS device-grant
+# flow, so a build that can enrol without TLS does not exist. Neither provider is on by default
+# now, and rustls with none named panics on the first `wss://` — `zyris` refuses that dial by name
+# (`ConnectError::NoTlsProvider`) instead of panicking, but a node that cannot dial is still a node
+# that cannot dial, and this loop classifies that refusal `Fatal`. Dropping `enroll` costs both
+# halves at once. `ring` is already in this lockfile through `tokio-tungstenite`, so naming it
+# costs no C compilation that was not already happening in the builder image.
+zyris = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "4e3ec99146bb2576aab28166239ea3b31483c23d", features = ["enroll"] }
+zyris-attacca = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "4e3ec99146bb2576aab28166239ea3b31483c23d" }
+
+# The capability declarations (`zyris-caps`) and the two reference implementations this node serves
+# (`zyris-fs`, `zyris-terminal`).
+#
+# **`zyris-capkit` is gone from here.** It is a re-export shell now, and the reason for the split is
+# a reason to move rather than to lean on the shell: `zyris-input` pins a git fork of `enigo`, and
+# while `LocalFileIo` and `PtyTerminal` shared a crate with it none of them could be published.
+# Naming the two this node actually serves also keeps `zyris-screen`'s X11/Wayland/D-Bus/PipeWire
+# stack out of the container build entirely rather than one feature flag away — which matters here
+# more than anywhere, because the runtime image is `debian-slim` with no dev packages at all.
+#
+#   zyris_capkit::LocalFileIo   -> zyris_fs::LocalFileIo
+#   zyris_capkit::PtyTerminal   -> zyris_terminal::PtyTerminal
+#   zyris_capkit::resolve_under -> zyris_caps::resolve_under   (unused here; `gate.rs` joins itself)
+zyris-caps = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "4e3ec99146bb2576aab28166239ea3b31483c23d" }
+zyris-fs = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "4e3ec99146bb2576aab28166239ea3b31483c23d" }
+zyris-terminal = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "4e3ec99146bb2576aab28166239ea3b31483c23d" }
+
+anyhow = "1.0"
+# Used by the code `#[zyris::capability]` generates — the macro emits `::zyris::serde` and
+# `::zyris::schemars` paths. **Match the versions to upstream's workspace** or the generated types
+# differ from upstream's and the traits stop lining up.
+schemars = "1.2.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+# `BoxFuture`, for the connect hook on the ported `Runner` (`src/runtime/runner.rs`).
+futures-util = "0.3.32"
+# The ported `Credentials` and `CredentialStore` traits are `#[async_trait]`.
+async-trait = "0.1.91"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time", "sync", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # libc only for `statvfs` (root-filesystem disk usage). Linux-only on purpose: this node targets
 # containers, and its system sampling reads /proc.
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-
-anyhow = "1.0"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-schemars = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time", "sync", "signal"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -43,4 +77,6 @@ strip = true
 lto = "thin"
 
 [profile.dev]
+# Full debug symbols make the target directory grow to tens of GB. Keep the line info backtraces
+# need and nothing else.
 debug = "line-tables-only"

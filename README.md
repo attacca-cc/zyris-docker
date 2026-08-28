@@ -21,8 +21,22 @@ not blindly restart things.
 
 ## How it connects
 
-The node enrolls with an Attacca account over the Zyris protocol, the same way `zyris-code` and
-`zyris-daemon` do. Enrollment prints an 8-character code you approve in the browser.
+The node presents a bearer token to an Attacca deployment over the Zyris protocol. It looks for
+one in this order, and the first answer wins:
+
+1. `ZYRIS_NODE_TOKEN` — a `znt_` node token in the environment.
+2. `ZYRIS_NODE_TOKEN_FILE` — the same token in a file. **This is the container path.** It is what a
+   Kubernetes Secret and `docker secret` mount, it is re-read on every reconnect so rotating the
+   Secret needs no restart, and unlike an environment variable it is not visible in `/proc` or
+   inherited by everything this node's `exec` capability spawns.
+3. Neither — the node enrolls itself, printing an eight-character code into the container log
+   (`docker logs` / `kubectl logs`) for you to approve in a browser. It then keeps the credential in
+   `ZYRIS_CONFIG_DIR` (default `/var/lib/zyris-docker`, a declared volume) and rotates it as it
+   expires. **Give that path a named volume** or every restart enrolls again and leaves a dead node
+   row in your account behind each time.
+
+A `znt_` never expires, so a node given one writes nothing and needs no volume at all. Enrollment
+is the convenience path for trying the image out; a token is the one to deploy.
 
 ## Quick start (Docker)
 
@@ -59,7 +73,9 @@ docker run --rm \
 services:
   zyris-docker:
     image: ghcr.io/attacca-cc/zyris-docker:latest
-    restart: unless-stopped
+    # Not `unless-stopped`: exit 2 means a person has to do something, and restarting through it
+    # loops forever. See "Stopping, and what the exit code means".
+    restart: on-failure:3
     environment:
       - ZYRIS_NODE_TOKEN_FILE=/run/secrets/zyris_token
       - ZYRISD_WATCH_CONTAINERS=web,db
@@ -73,18 +89,24 @@ services:
 
 ## Configuration
 
-The zyris runtime reads the standard variables; the node-specific knobs all carry a `ZYRISD_`
-prefix so they can never collide with the runtime's own.
+The standard `ZYRIS_*` variables are read by this node's own program layer (`src/runtime/`); the
+node-specific knobs all carry a `ZYRISD_` prefix so they can never collide with them.
 
 ### Runtime (zyris)
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ZYRIS_SERVER_URL` | `wss://attacca.cc/api/zyris/v1/ws` | Server to connect to |
-| `ZYRIS_NODE_NAME` | hostname | Node name shown in Attacca |
+| `ZYRIS_NODE_NAME` | hostname | Node name shown in Attacca. In a container the hostname is a random id that changes when the container is recreated — set this to something stable |
 | `ZYRIS_PROFILE` | `default` | Credential profile name |
-| `ZYRIS_SCOPES` | unset | Comma-separated scopes the node may ask for at enrollment |
+| `ZYRIS_SCOPES` | the five below | Comma-separated scopes to ask for at enrollment. Setting it wins over the built-in list |
+| `ZYRIS_CONFIG_DIR` | `/var/lib/zyris-docker` | Where a self-enrolled credential is kept. Used verbatim; also the directory `file_io` is denied |
 | `ZYRIS_NODE_TOKEN` / `ZYRIS_NODE_TOKEN_FILE` | — | The bearer token (or a file holding it) |
+
+The scopes asked for by default are `agents:read`, `sessions:write`, `sessions:read`,
+`projects:read` and `jobs:write` — what the self-healing watcher needs to open a session and drive
+it. Asking for a scope the deployment does not know refuses the whole authorization request, so
+narrow this list rather than widening it.
 
 ### Node (zyris-docker)
 
@@ -115,6 +137,23 @@ first agent), attaches the `ZYRISD_HEAL_PREAMBLE`, and sends the incident. The a
 node's `monitor` and `exec` tools to diagnose and fix — e.g. `docker_restart` a stopped container,
 or `exec` a recovery command — and reports back. The watcher keeps sampling; an incident that comes
 back re-opens a session, so nothing is silently ignored.
+
+## Stopping, and what the exit code means
+
+`SIGTERM` (`docker stop`, `docker compose down`, a pod eviction) and `Ctrl-C` both stop the node
+promptly and send a closing frame first, so the deployment retires it instead of routing tool calls
+at a node that has gone away.
+
+When it stops on its own, the status says whether restarting can help:
+
+| Status | Meaning |
+|---|---|
+| `0` | Stopped on request |
+| `1` | Refused in a way another dial will not change — a revoked credential, a malformed token |
+| `2` | **A person has to do something.** Nobody approved the enrollment code, the credential directory is not writable, a scope this build asks for does not exist on that deployment |
+
+`2` is worth wiring into your supervisor: with `restart: unless-stopped` a node that needs a human
+would otherwise loop forever, printing a fresh enrollment code into a log nobody is reading.
 
 ## Build from source
 

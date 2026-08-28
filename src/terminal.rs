@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zyris::{Blob, Streaming};
-use zyris_capkit::PtyTerminal;
+// `zyris-capkit` split into one crate per reference implementation; same type, own crate.
+use zyris_terminal::PtyTerminal;
 use zyris_caps::{ExecOutput, PtyChunk, PtyId, PtyOpened, PtyRead, PtyScreen, Settle, Terminal};
 
 use crate::gate::PathGate;
