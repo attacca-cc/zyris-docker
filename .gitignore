@@ -23,7 +23,12 @@ id_ed25519*
 config.toml
 credentials.toml
 *credentials*
-!src/**/credentials*   # (none, but don't ignore source)
+# Source is not a credential. **The comment on this line used to be on the one below it**, and
+# git does not take a trailing `#` as a comment — only one at the start of a line — so the
+# negation was the pattern `!src/**/credentials*   # (none, but don't ignore source)`, which
+# matches nothing. `src/runtime/credentials.rs` was silently left out of a commit and CI caught
+# it as `error[E0583]: file not found for module `credentials``.
+!src/**/credentials*
 *.part
 
 # Environment / secrets
