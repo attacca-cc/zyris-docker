@@ -6,7 +6,10 @@
 //! each tool's payload by hand.
 
 use zyris::{Chunk, Datum, Streaming};
-use zyris_capkit::LocalFileIo;
+// `zyris-capkit` split into one crate per reference implementation; this is the same type
+// under its own name. Taking the crate rather than the re-export shell is what keeps
+// `zyris-input`'s forked `enigo` and `zyris-screen`'s X11/Wayland stack out of this image.
+use zyris_fs::LocalFileIo;
 use zyris_caps::{DirEntry, FileEdit, FileIo, FileRead, FileStat};
 
 use crate::gate::PathGate;
