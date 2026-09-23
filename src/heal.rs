@@ -182,12 +182,7 @@ async fn report_incident(cfg: Config, conn: Connection, incident: Incident) {
     };
 
     let title = format!("zyris-docker incident: {} {}", incident.kind, incident.name);
-    let body = format!(
-        "Self-healing incident on container node.\n\n{}\n\n\
-         Diagnose with this node's `monitor` and `exec` capabilities, fix what you can, and report \
-         back what broke, what you found, what you did, and what remains.",
-        incident.detail,
-    );
+    let body = incident_body(&incident.detail, conn.info().node.as_ref());
 
     let session = match api
         .create_session_with(ZNewSession {
@@ -209,5 +204,45 @@ async fn report_incident(cfg: Config, conn: Connection, incident: Incident) {
         tracing::warn!(error = %e, "could not send incident to heal session");
     } else {
         tracing::info!(kind = %incident.kind, name = %incident.name, session = %session.id, "incident reported to Attacca");
+    }
+}
+
+/// What the heal session is told. **It names this node's `node_path`**, because every zyris tool
+/// takes one and the agent sees every node of the account: without it, "this node" is a guess.
+/// Read from the connection in hand, since a reconnect that did not resume can change it.
+fn incident_body(detail: &str, node: Option<&zyris::NodeAddress>) -> String {
+    let here = match node {
+        Some(node) => format!("This node's `node_path` is `{}`: pass it to every tool call.", node.path()),
+        None => "This node's `node_path` is not known yet; do not guess one.".to_string(),
+    };
+    format!(
+        "Self-healing incident on container node.\n\n{detail}\n\n{here}\n\n\
+         Diagnose with this node's `monitor` and `exec` capabilities, fix what you can, and report \
+         back what broke, what you found, what you did, and what remains."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review focus 5: the heal agent sees every node of the account through the same tools, so
+    /// the incident has to say which `node_path` is this container.
+    #[test]
+    fn the_incident_names_the_node_to_act_on() {
+        let node = zyris::NodeAddress {
+            system: "srv-a".into(),
+            program: "zyris-docker".into(),
+            name: "web-1".into(),
+        };
+        let body = incident_body("required process `nginx` is not running", Some(&node));
+        assert!(body.contains("`srv-a/zyris-docker/web-1`"), "{body}");
+        assert!(body.contains("nginx"), "{body}");
+    }
+
+    #[test]
+    fn with_no_address_the_incident_says_so_rather_than_naming_one() {
+        let body = incident_body("container `db` is not running", None);
+        assert!(body.contains("not known"), "{body}");
     }
 }
