@@ -39,10 +39,10 @@ COPY --from=builder /build/target/release/zyris-docker /usr/local/bin/zyris-dock
 # Docker / Kubernetes visibility — see the README.
 #
 # `/var/lib/zyris-docker` is where a node that enrolls for itself keeps its credential, and it has
-# to exist and be writable by this uid before the first rotation, not after. It is deliberately
+# to exist and be writable by this uid before the first enrollment, not after. It is deliberately
 # **not** under `/data`: that is the default `ZYRISD_FILE_ROOTS`, which is exactly the set `file_io`
-# and `exec` may touch, and a refresh token there is a refresh token the agent can read. A node
-# given `ZYRIS_NODE_TOKEN_FILE` never writes here at all.
+# and `exec` may touch, and a credential there is a credential the agent can read. A node given
+# `ZYRIS_CREDENTIAL_FILE` never writes here at all.
 RUN useradd -r -u 10001 zyris \
  && mkdir -p /data /var/lib/zyris-docker \
  && chown zyris:zyris /data /var/lib/zyris-docker \
@@ -52,6 +52,6 @@ USER zyris
 ENV ZYRISD_FILE_ROOTS=/data
 # `/var/lib/zyris-docker` is declared so a credential survives the container it was written in.
 # Name that volume (`-v zyris-creds:/var/lib/zyris-docker`) and it survives the container being
-# recreated too — otherwise every rollout enrolls again and leaves a dead node row behind.
+# recreated too — otherwise every rollout enrolls again and leaves an unused credential behind.
 VOLUME ["/data", "/var/lib/zyris-docker"]
 ENTRYPOINT ["/usr/local/bin/zyris-docker"]

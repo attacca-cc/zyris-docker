@@ -21,32 +21,38 @@ not blindly restart things.
 
 ## How it connects
 
-The node presents a bearer token to an Attacca deployment over the Zyris protocol. It looks for
+The node presents a `zc_` credential to an Attacca deployment over the Zyris protocol. It looks for
 one in this order, and the first answer wins:
 
-1. `ZYRIS_NODE_TOKEN` — a `znt_` node token in the environment.
-2. `ZYRIS_NODE_TOKEN_FILE` — the same token in a file. **This is the container path.** It is what a
-   Kubernetes Secret and `docker secret` mount, it is re-read on every reconnect so rotating the
-   Secret needs no restart, and unlike an environment variable it is not visible in `/proc` or
+1. `ZYRIS_CREDENTIAL` — the credential in the environment.
+2. `ZYRIS_CREDENTIAL_FILE` — the same credential in a file. **This is the container path.** It is
+   what a Kubernetes Secret and `docker secret` mount, it is re-read on every reconnect so replacing
+   the Secret needs no restart, and unlike an environment variable it is not visible in `/proc` or
    inherited by everything this node's `exec` capability spawns.
 3. Neither — the node enrolls itself, printing an eight-character code into the container log
    (`docker logs` / `kubectl logs`) for you to approve in a browser. It then keeps the credential in
-   `ZYRIS_CONFIG_DIR` (default `/var/lib/zyris-docker`, a declared volume) and rotates it as it
-   expires. **Give that path a named volume** or every restart enrolls again and leaves a dead node
-   row in your account behind each time.
+   `ZYRIS_CONFIG_DIR` (default `/var/lib/zyris-docker`, a declared volume). **Give that path a named
+   volume** or every recreated container enrolls again and leaves an unused credential in your
+   account behind each time.
 
-A `znt_` never expires, so a node given one writes nothing and needs no volume at all. Enrollment
-is the convenience path for trying the image out; a token is the one to deploy.
+Issue a credential under **`/settings/zyris` → + Issue credential** in Attacca: pick the system the
+containers belong to, the program name (`zyris-docker`) and the scopes, and copy the `zc_…` it
+shows once. It never expires. Revoking it — or deleting its system — disconnects every container
+presenting it, and those containers exit `1`. Each container connects as a node of its own,
+`<system>/zyris-docker/<ZYRIS_NODE_NAME>`; two live containers asking for the same name get `-2`.
+
+`ZYRIS_NODE_TOKEN` and `ZYRIS_NODE_TOKEN_FILE` are no longer read. A container that still sets one
+exits `2` and says which variable to use instead, rather than quietly enrolling.
 
 ## Quick start (Docker)
 
 ```bash
-# Enroll first to get a node token, then mount it into the container.
+# Issue a credential in Attacca (see above), save it as ./secrets/zyris_credential, then mount it.
 docker run --rm \
-  -e ZYRIS_NODE_TOKEN_FILE=/run/secrets/zyris_token \
+  -e ZYRIS_CREDENTIAL_FILE=/run/secrets/zyris_credential \
   -e ZYRISD_WATCH_CONTAINERS=web,db \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$PWD/secrets/zyris_token:/run/secrets/zyris_token:ro" \
+  -v "$PWD/secrets/zyris_credential:/run/secrets/zyris_credential:ro" \
   ghcr.io/attacca-cc/zyris-docker:latest
 ```
 
@@ -56,7 +62,7 @@ kubeconfig (or rely on an in-cluster service account, which `kubectl` discovers 
 
 ```bash
 docker run --rm \
-  -e ZYRIS_NODE_TOKEN_FILE=/run/secrets/zyris_token \
+  -e ZYRIS_CREDENTIAL_FILE=/run/secrets/zyris_credential \
   -e ZYRISD_WATCH_K8S=1 \
   -v "$HOME/.kube/config:/home/zyris/.kube/config:ro" \
   ghcr.io/attacca-cc/zyris-docker:latest
@@ -77,13 +83,13 @@ services:
     # loops forever. See "Stopping, and what the exit code means".
     restart: on-failure:3
     environment:
-      - ZYRIS_NODE_TOKEN_FILE=/run/secrets/zyris_token
+      - ZYRIS_CREDENTIAL_FILE=/run/secrets/zyris_credential
       - ZYRISD_WATCH_CONTAINERS=web,db
       - ZYRISD_WATCH_PROCESSES=nginx
       - ZYRISD_MONITOR_INTERVAL_SECS=30
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./secrets/zyris_token:/run/secrets/zyris_token:ro
+      - ./secrets/zyris_credential:/run/secrets/zyris_credential:ro
       - ./data:/data
 ```
 
@@ -97,11 +103,11 @@ node-specific knobs all carry a `ZYRISD_` prefix so they can never collide with 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ZYRIS_SERVER_URL` | `wss://attacca.cc/api/zyris/v1/ws` | Server to connect to |
-| `ZYRIS_NODE_NAME` | hostname | Node name shown in Attacca. In a container the hostname is a random id that changes when the container is recreated — set this to something stable |
+| `ZYRIS_NODE_NAME` | hostname | The node name this container asks for — the last part of its path, `<system>/zyris-docker/<name>`. In a container the hostname is a random id that changes when the container is recreated — set this to something stable |
 | `ZYRIS_PROFILE` | `default` | Credential profile name |
 | `ZYRIS_SCOPES` | the five below | Comma-separated scopes to ask for at enrollment. Setting it wins over the built-in list |
 | `ZYRIS_CONFIG_DIR` | `/var/lib/zyris-docker` | Where a self-enrolled credential is kept. Used verbatim; also the directory `file_io` is denied |
-| `ZYRIS_NODE_TOKEN` / `ZYRIS_NODE_TOKEN_FILE` | — | The bearer token (or a file holding it) |
+| `ZYRIS_CREDENTIAL` / `ZYRIS_CREDENTIAL_FILE` | — | The `zc_` credential (or a file holding it) |
 
 The scopes asked for by default are `agents:read`, `sessions:write`, `sessions:read`,
 `projects:read` and `jobs:write` — what the self-healing watcher needs to open a session and drive
@@ -149,8 +155,8 @@ When it stops on its own, the status says whether restarting can help:
 | Status | Meaning |
 |---|---|
 | `0` | Stopped on request |
-| `1` | Refused in a way another dial will not change — a revoked credential, a malformed token |
-| `2` | **A person has to do something.** Nobody approved the enrollment code, the credential directory is not writable, a scope this build asks for does not exist on that deployment |
+| `1` | Refused in a way another dial will not change — a revoked credential, a malformed credential |
+| `2` | **A person has to do something.** Nobody approved the enrollment code, the credential directory is not writable, a scope this build asks for does not exist on that deployment, a `ZYRIS_NODE_TOKEN*` variable is still set |
 
 `2` is worth wiring into your supervisor: with `restart: unless-stopped` a node that needs a human
 would otherwise loop forever, printing a fresh enrollment code into a log nobody is reading.
