@@ -18,10 +18,11 @@
 //! `ZYRIS_SCOPES`, `ZYRIS_CONFIG_DIR`, and the credential from `ZYRIS_CREDENTIAL` /
 //! `ZYRIS_CREDENTIAL_FILE`. This node's own knobs are `ZYRISD_*` (see `config.rs` and the README).
 //!
-//! **A mounted `zc_` is the deployment path.** It is issued once in Attacca (`/settings/zyris` →
-//! `+ Issue credential`) and never expires. Enrollment — an eight-character code printed into the
-//! container log for somebody to approve in a browser — is the fallback for a first run with nothing
-//! issued yet.
+//! **Enrollment is how a node gets a credential.** On a first run with nothing mounted, it prints
+//! an eight-character code into the container log for somebody to approve at `/settings/zyris` →
+//! Enter a code in Attacca; there is no manual "issue" step. A mounted `zc_` (`ZYRIS_CREDENTIAL` /
+//! `ZYRIS_CREDENTIAL_FILE`) skips that for a node that already has one — copied from another
+//! enrolled container, say — and never expires.
 
 mod config;
 mod docker;
