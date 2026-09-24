@@ -29,17 +29,22 @@ one in this order, and the first answer wins:
    what a Kubernetes Secret and `docker secret` mount, it is re-read on every reconnect so replacing
    the Secret needs no restart, and unlike an environment variable it is not visible in `/proc` or
    inherited by everything this node's `exec` capability spawns.
-3. Neither — the node enrolls itself, printing an eight-character code into the container log
-   (`docker logs` / `kubectl logs`) for you to approve in a browser. It then keeps the credential in
+3. Neither — **the recommended path.** The node enrolls itself, printing an eight-character code
+   into the container log (`docker logs` / `kubectl logs`). Go to **`/settings/zyris` → Enter a
+   code** in Attacca, type it in, and approve the program that appears — this is the only way to
+   obtain a Zyris credential; there is no manual "issue" step. It then keeps the credential in
    `ZYRIS_CONFIG_DIR` (default `/var/lib/zyris-docker`, a declared volume). **Give that path a named
    volume** or every recreated container enrolls again and leaves an unused credential in your
    account behind each time.
 
-Issue a credential under **`/settings/zyris` → + Issue credential** in Attacca: pick the system the
-containers belong to, the program name (`zyris-docker`) and the scopes, and copy the `zc_…` it
-shows once. It never expires. Revoking it — or deleting its system — disconnects every container
-presenting it, and those containers exit `1`. Each container connects as a node of its own,
+Approving lets you pick the system the containers belong to and the scopes to grant. The credential
+never expires; revoking it — or deleting its system — disconnects every container presenting it, and
+those containers exit `1`. Each container connects as a node of its own,
 `<system>/zyris-docker/<ZYRIS_NODE_NAME>`; two live containers asking for the same name get `-2`.
+
+`ZYRIS_CREDENTIAL`/`ZYRIS_CREDENTIAL_FILE` stay for a container that already has a credential —
+copied from another enrolled install, say — but approving a device code is how you get one in the
+first place.
 
 `ZYRIS_NODE_TOKEN` and `ZYRIS_NODE_TOKEN_FILE` are no longer read. A container that still sets one
 exits `2` and says which variable to use instead, rather than quietly enrolling.
@@ -47,7 +52,22 @@ exits `2` and says which variable to use instead, rather than quietly enrolling.
 ## Quick start (Docker)
 
 ```bash
-# Issue a credential in Attacca (see above), save it as ./secrets/zyris_credential, then mount it.
+docker run --rm \
+  -e ZYRIS_NODE_NAME=web-1 \
+  -e ZYRISD_WATCH_CONTAINERS=web,db \
+  -v zyris-docker-config:/var/lib/zyris-docker \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/attacca-cc/zyris-docker:latest
+```
+
+Watch the logs (`docker logs -f <container>`) for the eight-character code it prints on first
+start, then approve it at **`/settings/zyris` → Enter a code** in Attacca. The credential lands in
+the `zyris-docker-config` volume, so the same container keeps it across restarts and recreates.
+
+Already have a credential — copied from another enrolled container, say? Skip enrollment and mount
+it instead:
+
+```bash
 docker run --rm \
   -e ZYRIS_CREDENTIAL_FILE=/run/secrets/zyris_credential \
   -e ZYRISD_WATCH_CONTAINERS=web,db \
@@ -58,7 +78,8 @@ docker run --rm \
 
 To expose **Docker** state, mount the host's `/var/run/docker.sock` (as above) or point `DOCKER_HOST`
 at a remote context. To expose **Kubernetes** state, set `ZYRISD_WATCH_K8S=1` and mount a
-kubeconfig (or rely on an in-cluster service account, which `kubectl` discovers automatically):
+kubeconfig (or rely on an in-cluster service account, which `kubectl` discovers automatically). This
+example assumes a credential already mounted, as in the second form above:
 
 ```bash
 docker run --rm \
@@ -83,15 +104,24 @@ services:
     # loops forever. See "Stopping, and what the exit code means".
     restart: on-failure:3
     environment:
-      - ZYRIS_CREDENTIAL_FILE=/run/secrets/zyris_credential
+      - ZYRIS_NODE_NAME=web-1
       - ZYRISD_WATCH_CONTAINERS=web,db
       - ZYRISD_WATCH_PROCESSES=nginx
       - ZYRISD_MONITOR_INTERVAL_SECS=30
+      # Already have a credential? Set ZYRIS_CREDENTIAL_FILE (or ZYRIS_CREDENTIAL) instead and
+      # skip enrollment.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./secrets/zyris_credential:/run/secrets/zyris_credential:ro
+      - zyris-docker-config:/var/lib/zyris-docker
       - ./data:/data
+
+volumes:
+  zyris-docker-config:
 ```
+
+On first `up`, `docker compose logs -f zyris-docker` shows the enrollment code; approve it at
+`/settings/zyris` → Enter a code in Attacca. The `zyris-docker-config` volume keeps the credential
+for every recreate after that.
 
 ## Configuration
 

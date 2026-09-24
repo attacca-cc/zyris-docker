@@ -28,8 +28,8 @@ const PROGRAM: &str = "zyris-docker";
 ///
 /// **The order is the deployment story.** What an operator explicitly gives always wins —
 /// `$ZYRIS_CREDENTIAL`, then `$ZYRIS_CREDENTIAL_FILE` — and the path that has to ask a person comes
-/// last. A mounted `zc_` is issued once in Attacca and never expires, so a node given one writes
-/// nothing and needs no volume.
+/// last. A `zc_` obtained by approving a device code never expires, so a node given one directly
+/// writes nothing and needs no volume.
 ///
 /// **Scopes must be settled before getting here.** `main.rs` writes `$ZYRIS_SCOPES` before
 /// `RunConfig::from_env` reads it: settle them later and the approval page asks for nothing.
@@ -51,9 +51,9 @@ pub fn source(config: &RunConfig) -> Result<Arc<dyn Credentials>, CredentialsErr
     // enrollment code in a log nobody reads, and a node that never comes up.
     if let Some(name) = leftover(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty())) {
         return Err(CredentialsError::NeedsOperator(format!(
-            "{name} is no longer read: node tokens are gone. Issue a credential for this node in \
-             Attacca (/settings/zyris → + Issue credential) and pass it as ZYRIS_CREDENTIAL_FILE \
-             or ZYRIS_CREDENTIAL"
+            "{name} is no longer read: node tokens are gone. Remove it and either let this node \
+             enroll itself (approve the printed code at /settings/zyris → Enter a code in Attacca) \
+             or pass an existing credential as ZYRIS_CREDENTIAL_FILE or ZYRIS_CREDENTIAL"
         )));
     }
 
