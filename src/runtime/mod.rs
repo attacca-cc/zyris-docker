@@ -26,8 +26,8 @@
 //!   `SIGKILL`ed ten seconds later, having never sent the close frame that retires it server-side.
 //!
 //! What did **not** move is anything the library still does: the handshake, the reconnect
-//! primitives, the device-grant flow, and the account layer that rotates a refresh token. `Node`,
-//! `Account` and `zyris::enroll` are still upstream's, and this layer is only the loop around them.
+//! primitives and the device-grant flow. `Node` and `zyris::enroll` are still upstream's, and this
+//! layer is only the loop around them.
 
 pub mod credentials;
 mod runner;

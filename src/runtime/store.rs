@@ -7,33 +7,34 @@
 //! nothing at all. That is a trait, not a path, which is why [`CredentialStore`] is the seam and
 //! [`FileCredentialStore`] is merely the default behind it.
 //!
-//! What gets stored is [`zyris::AccountCredential`], and **it is field-for-field the old
-//! `StoredCredential` with the same `version = 1`**. Do not change the JSON and do not change the
-//! file name: any node that has already enrolled reads its credential back by exactly these rules,
-//! and a change to either answers a perfectly good credential with an enrollment code.
+//! What gets stored is [`zyris::Credential`] with `version = 2`, exactly as the device grant
+//! returned it. **A file an earlier image wrote holds an account credential instead** (`version =
+//! 1`, `access_token`/`refresh_token`): it does not parse as a credential, reads as
+//! [`CredentialStoreError::Unusable`], and is cleared so the node enrolls again — Attacca would
+//! answer its tokens with 401 anyway. The file name is unchanged, which is what lets that happen in
+//! place on an existing volume.
 //!
 //! Be honest about the threat model of the file backend: a file on disk cannot be protected from
 //! anyone who can become the user that owns it, and in this image that user also drives `exec`.
-//! For anything shared the right answer is a static `znt_` out of a secret manager, which is
-//! exactly why [`TokenFile`](crate::runtime::credentials::TokenFile) is the *first* source tried.
-//! What this backend can do is stop a credential leaking through a permissive umask or a restored
-//! tarball, and it does.
+//! For anything shared the right answer is a `zc_` issued in Attacca and mounted as
+//! `ZYRIS_CREDENTIAL_FILE`, which is exactly why
+//! [`TokenFile`](crate::runtime::credentials::TokenFile) is tried first. What this backend can do
+//! is stop a credential leaking through a permissive umask or a restored tarball, and it does.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use zyris::AccountCredential;
+use zyris::Credential;
 
 /// Bumped only on an incompatible change. A file from the future is refused rather than guessed
 /// at, because guessing wrong here means a node that authenticates as something unintended.
 ///
-/// **This must stay equal to the version `zyris::AccountCredential::new` stamps.** Upstream keeps
-/// its own copy of the number private, so there is nothing to import; the two agree at 1 today and
-/// that agreement is the only reason an already-enrolled node still loads its credential. If
-/// upstream ever bumps its version, this has to move with it.
-const CREDENTIAL_VERSION: u32 = 1;
+/// **This is the `version` Attacca's device grant stamps on a `zyris::Credential` (2).** An
+/// account credential from an earlier image never reaches this check — it lacks `secret` and fails
+/// to parse — but both roads end at `Unusable` and a fresh enrollment.
+const CREDENTIAL_VERSION: u32 = 2;
 
 /// Where the credential goes when nobody said otherwise.
 ///
@@ -117,10 +118,10 @@ impl CredentialStoreError {
 #[async_trait]
 pub trait CredentialStore: Send + Sync + 'static {
     /// The stored credential, or `None` when this node has never enrolled.
-    async fn load(&self) -> Result<Option<AccountCredential>, CredentialStoreError>;
+    async fn load(&self) -> Result<Option<Credential>, CredentialStoreError>;
     /// Write, replacing whatever was there. Callers persist *before* using a credential, so a
     /// backend that can be atomic should be.
-    async fn save(&self, credential: &AccountCredential) -> Result<(), CredentialStoreError>;
+    async fn save(&self, credential: &Credential) -> Result<(), CredentialStoreError>;
     /// Forget a credential the server will never honour again, so the next start enrolls cleanly
     /// instead of looping on it. Clearing nothing is success, not an error.
     async fn clear(&self) -> Result<(), CredentialStoreError>;
@@ -132,23 +133,23 @@ pub trait CredentialStore: Send + Sync + 'static {
 /// Keeps a credential for exactly as long as the process lives.
 ///
 /// It exists so the enrollment flow can be exercised end to end without touching a filesystem —
-/// `enroll.rs`'s tests build every `AccountGrant` on top of this. **`#[cfg(test)]` because nothing
+/// `enroll.rs`'s tests build every `DeviceGrant` on top of this. **`#[cfg(test)]` because nothing
 /// outside the tests builds one**: a container using it in earnest would re-enroll on every
 /// restart, which is the failure this whole module exists to avoid.
 #[cfg(test)]
 #[derive(Debug, Default)]
 pub struct MemoryCredentialStore {
-    held: std::sync::Mutex<Option<AccountCredential>>,
+    held: std::sync::Mutex<Option<Credential>>,
 }
 
 #[cfg(test)]
 #[async_trait]
 impl CredentialStore for MemoryCredentialStore {
-    async fn load(&self) -> Result<Option<AccountCredential>, CredentialStoreError> {
+    async fn load(&self) -> Result<Option<Credential>, CredentialStoreError> {
         Ok(self.held.lock().expect("credential mutex poisoned").clone())
     }
 
-    async fn save(&self, credential: &AccountCredential) -> Result<(), CredentialStoreError> {
+    async fn save(&self, credential: &Credential) -> Result<(), CredentialStoreError> {
         *self.held.lock().expect("credential mutex poisoned") = Some(credential.clone());
         Ok(())
     }
@@ -220,9 +221,8 @@ impl From<StoreError> for CredentialStoreError {
             // file that exists and cannot be read, and looping on it forever helps nobody.
             //
             // **A read-only or unwritable directory does not arrive here.** That is a *write*
-            // failure, and it reaches the caller through `on_rotate` — see `AccountGrant`'s
-            // `store_broke`, which is what stops the node rather than letting it dial on a spent
-            // refresh token. Which is the common case in a container with no volume mounted.
+            // failure, and it reaches the caller from `DeviceGrant::enroll`'s `save` as
+            // `NeedsOperator` — exit 2, before the new credential is ever dialled with.
             StoreError::UnknownVersion { .. } | StoreError::Corrupt(_) | StoreError::Io(_) => {
                 CredentialStoreError::Unusable(error.to_string())
             }
@@ -256,11 +256,11 @@ impl FileCredentialStore {
 
 #[async_trait]
 impl CredentialStore for FileCredentialStore {
-    async fn load(&self) -> Result<Option<AccountCredential>, CredentialStoreError> {
+    async fn load(&self) -> Result<Option<Credential>, CredentialStoreError> {
         Ok(load(&self.path)?)
     }
 
-    async fn save(&self, credential: &AccountCredential) -> Result<(), CredentialStoreError> {
+    async fn save(&self, credential: &Credential) -> Result<(), CredentialStoreError> {
         Ok(save(&self.path, credential)?)
     }
 
@@ -286,7 +286,7 @@ fn file_name(server_url: &str, profile: &str) -> String {
 /// private key. This is the cheapest possible mitigation for a credential restored from a tarball
 /// or created under a permissive umask, and refusing is safer than silently repairing: the
 /// operator should know it was exposed.
-fn load(path: &Path) -> Result<Option<AccountCredential>, StoreError> {
+fn load(path: &Path) -> Result<Option<Credential>, StoreError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -302,7 +302,7 @@ fn load(path: &Path) -> Result<Option<AccountCredential>, StoreError> {
         }
     }
 
-    let credential: AccountCredential =
+    let credential: Credential =
         serde_json::from_slice(&bytes).map_err(StoreError::Corrupt)?;
     if credential.version != CREDENTIAL_VERSION {
         return Err(StoreError::UnknownVersion { found: credential.version });
@@ -314,7 +314,7 @@ fn load(path: &Path) -> Result<Option<AccountCredential>, StoreError> {
 /// a half-written credential, because that is indistinguishable from a corrupt one and would force
 /// a re-enrollment that needed a human — and in a container `SIGKILL` mid-write is not exotic, it
 /// is what happens ten seconds after every `docker stop`.
-fn save(path: &Path, credential: &AccountCredential) -> Result<(), StoreError> {
+fn save(path: &Path, credential: &Credential) -> Result<(), StoreError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
         #[cfg(unix)]
@@ -380,15 +380,27 @@ fn slugify(input: &str) -> String {
 mod tests {
     use super::*;
 
-    fn credential() -> AccountCredential {
-        AccountCredential::new(
-            "zna_access".into(),
-            "znr_refresh".into(),
-            "node-id".into(),
-            "zyris-docker-node".into(),
-            "allen@example.com".into(),
-            1_000_000,
-        )
+    fn credential() -> Credential {
+        Credential {
+            version: CREDENTIAL_VERSION,
+            secret: "zc_secret".into(),
+            system: zyris::Named { id: "s".into(), name: "srv-a".into(), slug: "srv-a".into() },
+            program: zyris::Named {
+                id: "c".into(),
+                name: "zyris-docker".into(),
+                slug: "zyris-docker".into(),
+            },
+            scopes: vec!["agents:read".into()],
+            owner_email: "allen@example.com".into(),
+        }
+    }
+
+    fn private(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
     }
 
     #[tokio::test]
@@ -423,32 +435,29 @@ mod tests {
         assert!(!dir.starts_with("/data"), "the agent may read everything under the file roots");
     }
 
-    /// `bearer` immediately before each dial is the whole mid-connection-expiry story, so the skew
-    /// boundary is the thing worth pinning. The method is upstream's — this stays as a
-    /// characterization test, because our dial loop is built on the answer it gives.
+    /// The JSON the device grant turns into, spelled out as bytes so a change to
+    /// `zyris::Credential`'s shape has to fail here before it strands an enrolled node.
     #[test]
-    fn bearer_expires_early_by_the_skew_allowance() {
-        let credential = credential();
-        assert_eq!(credential.bearer(0, 30), Some("zna_access"));
-        assert_eq!(credential.bearer(999_969, 30), Some("zna_access"));
-        // 30 seconds out with a 30-second allowance: refuse, rather than race the handshake.
-        assert_eq!(credential.bearer(999_970, 30), None);
-        assert_eq!(credential.bearer(2_000_000, 30), None);
+    fn a_credential_file_in_the_stored_format_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wss-attacca-cc-api-zyris-v1-ws-default.json");
+        fs::write(
+            &path,
+            br#"{"version":2,"secret":"zc_secret",
+                "system":{"id":"s","name":"srv-a","slug":"srv-a"},
+                "program":{"id":"c","name":"zyris-docker","slug":"zyris-docker"},
+                "scopes":["agents:read"],"owner_email":"allen@example.com"}"#,
+        )
+        .unwrap();
+        private(&path);
+        assert_eq!(load(&path).unwrap().unwrap(), credential());
     }
 
+    /// **An account credential an earlier image wrote is thrown away, not refused.** Attacca
+    /// answers its tokens with 401 now; `Unusable` clears it and enrolls, where `Refused` would exit
+    /// 2 over a file nobody can use.
     #[test]
-    fn refresh_fires_at_eighty_percent_of_the_lifetime() {
-        let credential = credential();
-        // A one-hour token expiring at 1_000_000 was issued at 996_400; 80% of the way is 999_280.
-        assert!(!credential.should_refresh(999_279, 3600));
-        assert!(credential.should_refresh(999_280, 3600));
-    }
-
-    /// A credential file written by any build that shares the `version = 1` JSON must still load.
-    /// Spelled out as bytes rather than round-tripped, so a change to the struct that breaks an
-    /// enrolled node has to fail here first.
-    #[test]
-    fn a_credential_file_in_the_stored_format_still_loads() {
+    fn an_account_credential_from_an_earlier_release_is_discardable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wss-attacca-cc-api-zyris-v1-ws-default.json");
         fs::write(
@@ -458,12 +467,9 @@ mod tests {
                 "owner_email":"allen@example.com","access_expires_at":1000000}"#,
         )
         .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-        }
-        assert_eq!(load(&path).unwrap().unwrap(), credential());
+        private(&path);
+        let error = CredentialStoreError::from(load(&path).unwrap_err());
+        assert!(error.is_discardable(), "{error}");
     }
 
     #[tokio::test]

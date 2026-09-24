@@ -13,18 +13,15 @@
 //! fixes it with this node's own tools, then reports back.
 //!
 //! Configuration is environment-driven. **The program layer that reads those variables is this
-//! node's own now** (`src/runtime/`, `src/enroll.rs`): upstream deleted `zyris::runtime` when
-//! `zyris` became a library, on the grounds that backoff, exit codes and where on a machine a
-//! secret may be written are properties of a program rather than of a protocol. What it reads is
-//! unchanged — `ZYRIS_SERVER_URL`, `ZYRIS_NODE_NAME`, `ZYRIS_PROFILE`, `ZYRIS_SCOPES`,
-//! `ZYRIS_CONFIG_DIR`, and credentials from `ZYRIS_NODE_TOKEN` / `ZYRIS_NODE_TOKEN_FILE`. This
-//! node's own knobs are `ZYRISD_*` (see `config.rs` and the README).
+//! node's own** (`src/runtime/`, `src/enroll.rs`): upstream deleted `zyris::runtime` when `zyris`
+//! became a library. What it reads: `ZYRIS_SERVER_URL`, `ZYRIS_NODE_NAME`, `ZYRIS_PROFILE`,
+//! `ZYRIS_SCOPES`, `ZYRIS_CONFIG_DIR`, and the credential from `ZYRIS_CREDENTIAL` /
+//! `ZYRIS_CREDENTIAL_FILE`. This node's own knobs are `ZYRISD_*` (see `config.rs` and the README).
 //!
-//! **A mounted `znt_` is the deployment path and always was.** Enrollment — an eight-character
-//! code printed into the container log for somebody to approve in a browser — is the fallback for
-//! a first run with no token yet, and it is real for the first time in this build: before the port
-//! this node was compiled without zyris's `enroll` feature, so `request_scopes` fed a device grant
-//! that was never constructed and the only working credential sources were the two token forms.
+//! **A mounted `zc_` is the deployment path.** It is issued once in Attacca (`/settings/zyris` →
+//! `+ Issue credential`) and never expires. Enrollment — an eight-character code printed into the
+//! container log for somebody to approve in a browser — is the fallback for a first run with nothing
+//! issued yet.
 
 mod config;
 mod docker;
@@ -119,8 +116,8 @@ fn main() {
     let creds: Arc<dyn runtime::Credentials> = match enroll::source(&config) {
         Ok(creds) => creds,
         // Through `RunError` so it lands on the same exit-code table as every later failure: an
-        // `atk_` key pasted into `$ZYRIS_NODE_TOKEN` is 1 — nothing to wait for, and no amount of
-        // restarting rewrites it — where a credential nobody has approved yet is 2.
+        // `atk_` key pasted into `$ZYRIS_CREDENTIAL` is 1 — nothing to wait for, and no amount of
+        // restarting rewrites it — where a leftover `$ZYRIS_NODE_TOKEN` is 2.
         Err(e) => {
             let error = RunError::from(e);
             tracing::error!(%error, "could not decide what credential to present");
@@ -209,7 +206,7 @@ fn resolve_roots(cfg: &Config) -> (Vec<PathBuf>, Vec<PathBuf>) {
     // **It comes from the same function the store writes through** (`runtime::credential_dir`).
     // Before the port these were two answers that disagreed: this list guarded `$HOME/.zyris` while
     // the runtime it was guarding against wrote to `$XDG_CONFIG_HOME/zyris`, so the gate denied a
-    // directory that held nothing and left the one that would hold the refresh token open. One
+    // directory that held nothing and left the one that would hold the credential open. One
     // function, or they drift apart again.
     let deny: Vec<PathBuf> = vec![
         PathBuf::from("/run/secrets"),
