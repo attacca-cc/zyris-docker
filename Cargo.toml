@@ -12,8 +12,9 @@ name = "zyris-docker"
 path = "src/main.rs"
 
 [dependencies]
-# Pinned to zyris-protocol's merged credential/node redesign, `eefbde4`. **All five must be the
-# same rev** — a mismatch links the same crate twice and every shared type stops being the same
+# Pinned to `733ae80`, which carries `ZSessionEvent.id` on top of zyris-protocol's merged
+# `cancel_turn` delivery point and `ZTurnFrame::Cancelled` (zyris-protocol#44). **All five must be
+# the same rev** — a mismatch links the same crate twice and every shared type stops being the same
 # type ("same type but the types differ").
 #
 # **The repository was renamed** `attacca-cc/zyris` -> `attacca-cc/zyris-protocol`. GitHub redirects
@@ -28,8 +29,8 @@ path = "src/main.rs"
 # that cannot dial, and this loop classifies that refusal `Fatal`. Dropping `enroll` costs both
 # halves at once. `ring` is already in this lockfile through `tokio-tungstenite`, so naming it
 # costs no C compilation that was not already happening in the builder image.
-zyris = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "eefbde4ce11635828eea871e79a685dedc0ea917", features = ["enroll"] }
-zyris-attacca = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "eefbde4ce11635828eea871e79a685dedc0ea917" }
+zyris = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "733ae807f540535fab9f6c3ae646e27e28f4b48b", features = ["enroll"] }
+zyris-attacca = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "733ae807f540535fab9f6c3ae646e27e28f4b48b" }
 
 # The capability declarations (`zyris-caps`) and the two reference implementations this node serves
 # (`zyris-fs`, `zyris-terminal`).
@@ -44,9 +45,9 @@ zyris-attacca = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "e
 #   zyris_capkit::LocalFileIo   -> zyris_fs::LocalFileIo
 #   zyris_capkit::PtyTerminal   -> zyris_terminal::PtyTerminal
 #   zyris_capkit::resolve_under -> zyris_caps::resolve_under   (unused here; `gate.rs` joins itself)
-zyris-caps = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "eefbde4ce11635828eea871e79a685dedc0ea917" }
-zyris-fs = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "eefbde4ce11635828eea871e79a685dedc0ea917" }
-zyris-terminal = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "eefbde4ce11635828eea871e79a685dedc0ea917" }
+zyris-caps = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "733ae807f540535fab9f6c3ae646e27e28f4b48b" }
+zyris-fs = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "733ae807f540535fab9f6c3ae646e27e28f4b48b" }
+zyris-terminal = { git = "https://github.com/attacca-cc/zyris-protocol", rev = "733ae807f540535fab9f6c3ae646e27e28f4b48b" }
 
 anyhow = "1.0"
 # Used by the code `#[zyris::capability]` generates — the macro emits `::zyris::serde` and
